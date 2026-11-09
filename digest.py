@@ -9,7 +9,8 @@ from google import genai
 
 # ---------- À PERSONNALISER ----------
 # Vérifie le nom exact du modèle gratuit dans Google AI Studio
-MODEL = "gemini-3.8-flash"
+# Le script essaie les modèles dans l'ordre si le premier est surchargé (erreur 503)
+MODELES = ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
 
 MAX_ARTICLES_PAR_THEME = 15   # articles envoyés au LLM par thème
 ITEMS_PAR_THEME = 3           # items dans le digest final
@@ -111,13 +112,26 @@ def envoyer_email(corps):
         s.send_message(msg)
 
 
+def generer(client, prompt):
+    """Essaie chaque modèle plusieurs fois, avec une pause croissante."""
+    derniere_erreur = None
+    for modele in MODELES:
+        for tentative in range(4):
+            try:
+                return client.models.generate_content(model=modele, contents=prompt).text
+            except Exception as ex:
+                derniere_erreur = ex
+                attente = 15 * (tentative + 1)
+                print(f"{modele} tentative {tentative + 1} échouée : {ex}")
+                time.sleep(attente)
+    raise derniere_erreur
+
+
 def main():
     donnees = {t: recuperer_articles(urls) for t, urls in THEMES.items()}
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    reponse = client.models.generate_content(
-        model=MODEL, contents=construire_prompt(donnees)
-    )
-    envoyer_email(reponse.text)
+    corps = generer(client, construire_prompt(donnees))
+    envoyer_email(corps)
     print("Digest envoyé.")
 
 
